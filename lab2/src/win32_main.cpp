@@ -27,6 +27,7 @@ typedef struct BufHdr
 #define buf_push(b, x) (buf__fit(b, 1), (b)[buf_len(b)] = (x), buf__hdr(b)->len++)
 #define buf_pop(b) ((b)[--(buf__hdr(b)->len)])
 
+// TODO(max): test this macro in buf_test
 #define buf_free(b) ((b) ? free(buf__hdr(b)), (void)((b)=NULL) : (void)0)
 
 void *buf__grow(const void *buf, size_t new_len, size_t elem_size)
