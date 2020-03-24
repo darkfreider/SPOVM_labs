@@ -117,15 +117,35 @@ pid_t fork_ps()
 size_t curr_ps = 0;
 pid_t *pbuf = 0;
 
+// process scheduler
+void sigusr1_handler(int a, siginfo_t *b, void* c)
+{
+	size_t next_ps = (curr_ps + 1) % buf_len(pbuf);
+	curr_ps++;
+	kill(pbuf[next_ps], SIGUSR1);
+}
+
 int main(void) {
 	buf_test();
+	
 	init_termios();
+
+	sigset_t set;
+	sigemptyset(&set);
+	sigaddset(&set, SIGUSR1);
+
+	struct sigaction sa = {};
+	sa.sa_sigaction = sigusr1_handler;
+	sa.sa_flags = SA_SIGINFO;
+	sigaction(SIGUSR1, &sa, 0);
+
 	bool running = true;
 	while (running)
 	{
 		char c = getchar();
 		if (c == 'q')
 		{
+			printf("terminating\n");
 			running = false;
 			for (size_t i = 0; i < buf_len(pbuf); i++)
 			{
@@ -135,8 +155,14 @@ int main(void) {
 		}
 		else if (c == '+')
 		{
+			printf("main +\n");
 			pid_t p = fork_ps();
 			buf_push(pbuf, p);
+			if (buf_len(pbuf) == 1)
+			{
+				printf("raising!\n");
+				raise(SIGUSR1);
+			}
 		}
 		else if (c == '-')
 		{
