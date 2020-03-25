@@ -6,6 +6,8 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/types.h>
+#include <assert.h>
+
 
 #define MAX(x, y) ((x) >= (y) ? (x) : (y))
 
@@ -87,57 +89,87 @@ void reset_termios(void)
 	tcsetattr(0, TCSANOW, &old);
 }
 
-pid_t fork_ps()
-{
-	pid_t result = fork();
-	if (result)
-	{
-		// parent
-	}
-	else if (!result)
-	{
-		char *const args[] = {
-			(char *const)"linux_child",
-			0
-		};
-
-		if (execv("./linux_child", args) == (-1))
-		{
-			printf("ERROR :: can't execute process\n");
-		}
-	}
-	else
-	{
-		printf("ERROR :: can't fork a process\n");
-	}
-
-	return (result);
-}
 
 size_t curr_ps = 0;
 pid_t *pbuf = 0;
 
 // process scheduler
-void sigusr1_handler(int a, siginfo_t *b, void* c)
+void sigusr1_handler_parent(int)
 {
-	size_t next_ps = (curr_ps + 1) % buf_len(pbuf);
-	curr_ps++;
-	kill(pbuf[next_ps], SIGUSR1);
+	sleep(1);
+	//printf("sigusr1_handler_parent\n");
+	//assert(buf_len(pbuf) != 0);
+	if (buf_len(pbuf) > 0)
+	{
+		size_t next_ps = (curr_ps + 1) % buf_len(pbuf);
+		curr_ps++;
+		kill(pbuf[next_ps], SIGUSR1);
+	}
 }
+
+void sigusr1_handler_child(int)
+{
+	//printf("sigusr_handler_child\n");
+}
+
+bool g_exit_child = false;
+void sigterm_handler_child(int)
+{
+	g_exit_child = true;	
+}
+
+pid_t fork_ps()
+{
+	pid_t result = fork();
+	static bool parent_handler_inited = false;
+	
+	if (result && !parent_handler_inited)
+	{
+		parent_handler_inited = true;
+		//printf("initing parent handler\n");
+		signal(SIGUSR1, sigusr1_handler_parent);
+	}
+	else if (!result)
+	{
+		//printf("child process has been launched\n");
+		signal(SIGUSR1, sigusr1_handler_child); 
+		signal(SIGTERM, sigterm_handler_child);
+
+		sigset_t set;
+		sigemptyset(&set);
+		sigaddset(&set, SIGUSR1);
+		
+		for (;;)
+		{
+			int sig;
+			sigwait(&set, &sig);
+		
+			
+			printf("child %d\n", getpid());
+			kill(getppid(), SIGUSR1);
+		
+			if (g_exit_child)
+				exit(0);	
+			
+			
+			sleep(1);
+		}
+
+	}
+	else if (result == -1)
+	{
+		printf("ERROR :: can't fork a process\n");
+	}
+	sleep(1);
+	return (result);
+}
+
 
 int main(void) {
 	buf_test();
 	
 	init_termios();
 
-	sigset_t set;
-	sigemptyset(&set);
-	sigaddset(&set, SIGUSR1);
-
-	struct sigaction sa = {};
-	sa.sa_sigaction = sigusr1_handler;
-	sa.sa_flags = SA_SIGINFO;
-	sigaction(SIGUSR1, &sa, 0);
 
 	bool running = true;
 	while (running)
@@ -151,25 +183,23 @@ int main(void) {
 			{
 				kill(pbuf[i], SIGTERM);
 			}
-			// terminate all prosesses with kill(pid, SIG_INT);
 		}
 		else if (c == '+')
 		{
-			printf("main +\n");
+			//printf("main +\n");
 			pid_t p = fork_ps();
 			buf_push(pbuf, p);
 			if (buf_len(pbuf) == 1)
 			{
-				printf("raising!\n");
-				raise(SIGUSR1);
+				//printf("raising!\n");
+				kill(pbuf[0], SIGUSR1);
 			}
 		}
 		else if (c == '-')
 		{
-			/*
 			pid_t last_ps = buf_pop(pbuf);
-			terminate last_ps
-			*/
+			kill(last_ps, SIGTERM);
+			kill(last_ps, SIGUSR1);
 		}
 	}
 	//fork_ps();
