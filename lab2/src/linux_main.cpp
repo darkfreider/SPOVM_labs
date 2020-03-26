@@ -7,7 +7,7 @@
 #include <signal.h>
 #include <sys/types.h>
 #include <assert.h>
-
+#include <sys/wait.h>
 
 #define MAX(x, y) ((x) >= (y) ? (x) : (y))
 
@@ -90,77 +90,117 @@ void reset_termios(void)
 }
 
 
-size_t curr_ps = 0;
-pid_t *pbuf = 0;
+size_t volatile curr_ps = 0;
+pid_t *volatile pbuf = 0;
 
 // process scheduler
 void sigusr1_handler_parent(int)
 {
-	sleep(1);
-	//printf("sigusr1_handler_parent\n");
+	//printf("schedule\n");
 	//assert(buf_len(pbuf) != 0);
+	
 	if (buf_len(pbuf) > 0)
 	{
-		size_t next_ps = (curr_ps + 1) % buf_len(pbuf);
+		//printf("choosing process to wake up (in parent\n");
+		size_t next_ps = (curr_ps) % buf_len(pbuf);
 		curr_ps++;
 		kill(pbuf[next_ps], SIGUSR1);
 	}
 }
-
-void sigusr1_handler_child(int)
+void sigusr2_handler_parent(int)
 {
-	//printf("sigusr_handler_child\n");
+	//printf("sigusr2_parent\n");
+	return;
 }
 
-bool g_exit_child = false;
+bool volatile wake_up = false;
+void sigusr1_handler_child(int)
+{
+	//printf("sigusr_child\n");
+	wake_up = true;
+}
+
+bool volatile g_exit_child = false;
 void sigterm_handler_child(int)
 {
-	g_exit_child = true;	
+	//printf("sigterm_child\n");
+	//g_exit_child = true;
+	exit(0);	
 }
 
 pid_t fork_ps()
 {
 	pid_t result = fork();
-	static bool parent_handler_inited = false;
 	
-	if (result && !parent_handler_inited)
+	if (!result)
 	{
-		parent_handler_inited = true;
-		//printf("initing parent handler\n");
-		signal(SIGUSR1, sigusr1_handler_parent);
-	}
-	else if (!result)
-	{
+		struct sigaction new_sigusr1 = {};
+		new_sigusr1.sa_handler = sigusr1_handler_child;
+		sigemptyset(&new_sigusr1.sa_mask);
+		new_sigusr1.sa_flags = 0;
+		sigaction(SIGUSR1, &new_sigusr1, 0);
+	
+		struct sigaction new_sigterm = {};
+		new_sigterm.sa_handler = sigterm_handler_child;
+		sigemptyset(&new_sigterm.sa_mask);
+		new_sigterm.sa_flags = 0;
+		sigaction(SIGTERM, &new_sigterm, 0);
+
 		//printf("child process has been launched\n");
-		signal(SIGUSR1, sigusr1_handler_child); 
-		signal(SIGTERM, sigterm_handler_child);
+		//signal(SIGUSR1, sigusr1_handler_child); 
+		//signal(SIGTERM, sigterm_handler_child);
 
 		sigset_t set;
 		sigemptyset(&set);
 		sigaddset(&set, SIGUSR1);
 		
+		kill(getppid(), SIGUSR2);
+
 		for (;;)
 		{
-			int sig;
-			sigwait(&set, &sig);
-		
+			//printf("start waiting (child)\n");
 			
-			printf("child %d\n", getpid());
-			kill(getppid(), SIGUSR1);
-		
-			if (g_exit_child)
-				exit(0);	
+			sigset_t new_mask, old_mask;
+			sigemptyset(&new_mask);
+			sigemptyset(&old_mask);
+
+			sigaddset(&new_mask, SIGUSR1);
+			sigaddset(&new_mask, SIGTERM);
+			sigprocmask(SIG_BLOCK, &new_mask, &old_mask);
 			
+			// TODO(max): mask all signals (critical sectioin)
+			if (wake_up)
+			{
+				wake_up = false;	
+				//printf("after wakeup (child)\n");	
+				if (!g_exit_child)
+				{
+					sleep(1);
+					printf("child %d\n", getpid());
+					kill(getppid(), SIGUSR1);
+					//printf("after yeilding (child)\n");
+				}
+				else
+				{
+					exit(0);
+				}
+			}	
 			
-			sleep(1);
+			sigprocmask(SIG_SETMASK, &old_mask, 0);
+				
 		}
 
 	}
 	else if (result == -1)
 	{
 		printf("ERROR :: can't fork a process\n");
+		exit(1);
 	}
-	sleep(1);
+
+	//printf("about to pause and wait for init of a child\n");
+	pause();
+	//printf("after wakeup (parent)\n");
+
 	return (result);
 }
 
@@ -169,7 +209,21 @@ int main(void) {
 	buf_test();
 	
 	init_termios();
+	
+	struct sigaction new_sigusr1 = {};
+	new_sigusr1.sa_handler = sigusr1_handler_parent;
+	sigemptyset(&new_sigusr1.sa_mask);
+	new_sigusr1.sa_flags = 0;
+	sigaction(SIGUSR1, &new_sigusr1, 0);
 
+	struct sigaction new_sigusr2 = {};
+	new_sigusr2.sa_handler = sigusr2_handler_parent;
+	sigemptyset(&new_sigusr2.sa_mask);
+	new_sigusr2.sa_flags = 0;
+	sigaction(SIGUSR2, &new_sigusr2, 0);
+		
+	//signal(SIGUSR1, sigusr1_handler_parent);
+	//signal(SIGUSR2, sigusr2_handler_parent);
 
 	bool running = true;
 	while (running)
@@ -178,31 +232,74 @@ int main(void) {
 		if (c == 'q')
 		{
 			printf("terminating\n");
+			
+			sigset_t new_mask, old_mask;
+			sigemptyset(&new_mask);
+			sigemptyset(&old_mask);
+
+			sigaddset(&new_mask, SIGUSR1);
+			sigprocmask(SIG_BLOCK, &new_mask, &old_mask);
+			
 			running = false;
 			for (size_t i = 0; i < buf_len(pbuf); i++)
 			{
 				kill(pbuf[i], SIGTERM);
 			}
+
+			for (size_t i = 0; i < buf_len(pbuf); i++)
+			{
+				int s;
+				waitpid(pbuf[i], &s, 0);
+			}
+
+			sigprocmask(SIG_SETMASK, &old_mask, 0);
+			reset_termios();
+			exit(0);
 		}
 		else if (c == '+')
 		{
+			// TODO(max): need to mask signals
 			//printf("main +\n");
 			pid_t p = fork_ps();
+			//printf("before + cricical section\n");
+
+			sigset_t new_mask, old_mask;
+			sigemptyset(&new_mask);
+			sigemptyset(&old_mask);
+
+			sigaddset(&new_mask, SIGUSR1);
+			sigprocmask(SIG_BLOCK, &new_mask, &old_mask);
+
 			buf_push(pbuf, p);
+			//printf("pushing child pd (parent)\n");
 			if (buf_len(pbuf) == 1)
 			{
 				//printf("raising!\n");
 				kill(pbuf[0], SIGUSR1);
 			}
+			sigprocmask(SIG_SETMASK, &old_mask, 0);
 		}
 		else if (c == '-')
 		{
-			pid_t last_ps = buf_pop(pbuf);
-			kill(last_ps, SIGTERM);
-			kill(last_ps, SIGUSR1);
+			// TODO(max): need to mask signals
+			sigset_t new_mask, old_mask;
+			sigemptyset(&new_mask);
+			sigemptyset(&old_mask);
+
+			sigaddset(&new_mask, SIGUSR1);
+			sigprocmask(SIG_BLOCK, &new_mask, &old_mask);
+			
+			
+			if (buf_len(pbuf) > 0)
+			{
+				pid_t last_ps = buf_pop(pbuf);
+				kill(last_ps, SIGTERM);
+				kill(last_ps, SIGUSR1);
+			}
+
+			sigprocmask(SIG_SETMASK, &old_mask, 0);
 		}
 	}
-	//fork_ps();
 
 	reset_termios(); 
 	return 0;
