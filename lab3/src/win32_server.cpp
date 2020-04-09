@@ -10,8 +10,9 @@ int main(void)
 	if (pipe_handle != INVALID_HANDLE_VALUE)
 	{
 		HANDLE server_semaphore = CreateSemaphoreA(0, 0, 1, "lab3_server_semaphore");
-		if (server_semaphore != ERROR_INVALID_HANDLE)
+		if (server_semaphore != 0)
 		{
+			printf("waiting for a client to connect\n");
 			BOOL connected = ConnectNamedPipe(pipe_handle, 0) ? TRUE : (GetLastError() == ERROR_PIPE_CONNECTED);
 			if (connected)
 			{
@@ -19,14 +20,19 @@ int main(void)
 
 				for (;;)
 				{
-					// sleep on server_semaphore
+					printf("waiting on a server semaphore\n");
 					WaitForSingleObject(server_semaphore, INFINITE);
 
+					printf("enter data: ");
 					int msg_len = scanf("%512s", input_buffer);
 					if (msg_len > 0)
 					{
-						// send data
-						// signal client_semaphore
+						DWORD bytes_written = 0;
+						WriteFile(pipe_handle, input_buffer, msg_len, &bytes_written, 0);
+
+						HANDLE client_semaphore = OpenSemaphoreA(SYNCHRONIZE, FALSE, "lab3_client_semaphore");
+						ReleaseSemaphore(client_semaphore, 1, 0);
+						CloseHandle(client_semaphore);
 					}
 					else
 					{
