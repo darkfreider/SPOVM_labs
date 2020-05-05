@@ -22,8 +22,8 @@ int main(void)
 	 * */
 
 	sem_unlink("/binary_sem");
-	sem_unlink("/some");
-	sem_unlink("str_present");
+	sem_unlink("/str_present");
+	sem_unlink("/str_not_present");
 	
 	sem_t *mutex = sem_open("/binary_sem", O_CREAT | O_RDWR, 0664, 1);
 	if (mutex == SEM_FAILED)
@@ -38,7 +38,7 @@ int main(void)
 		exit(-1);	
 	}
 	
-	sem_t *str_not_present = sem_open("/some", O_CREAT | O_RDWR, 0664, 1);
+	sem_t *str_not_present = sem_open("/str_not_present", O_CREAT | O_RDWR, 0664, 1);
 	if (str_not_present == SEM_FAILED)
 	{
 		sem_close(mutex);
@@ -67,7 +67,7 @@ int main(void)
 			sem_close(mutex);
 			exit(-1);	
 		}
-		sem_t *str_not_present = sem_open("/some", O_RDWR);	
+		sem_t *str_not_present = sem_open("/str_not_present", O_RDWR);	
 		if (str_not_present == SEM_FAILED)
 		{
 			printf("child sem f\n");	
