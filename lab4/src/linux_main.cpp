@@ -105,14 +105,19 @@ THREAD_PROC(thread_print_id)
 	char msg[256] = {};
 	snprintf(msg, 256, "hello from %d\n", tid);
 
-	while (!thread_need_to_exit[exit_status_index])
+	bool running = true;
+	while (running)
 	{
 		pthread_mutex_lock(&g_terminal_lock);
+		
 		char *c = msg;
 		while (*c)
 		{
 			putchar(*c++);	
 		}
+		
+		running = !thread_need_to_exit[exit_status_index];
+		
 		pthread_mutex_unlock(&g_terminal_lock);
 
 		sleep(1);
