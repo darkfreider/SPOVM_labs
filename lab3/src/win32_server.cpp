@@ -41,13 +41,15 @@ int main(void)
 			startup_info.cb = sizeof(startup_info);
 			if (CreateProcessA("win32_client.exe", 0, 0, 0, FALSE, NORMAL_PRIORITY_CLASS, 0, 0, &startup_info, &process_info))
 			{
+				bool running = true;
 				char text_buffer[512];
-				for (;;)
+				while (running)
 				{
 					char *res = fgets(text_buffer, sizeof(text_buffer), stdin);
 					if (!res)
 					{
-						break;
+						running = false;
+						text_buffer[0] = '\0';
 					}
 
 					WaitForSingleObject(str_not_present, INFINITE);

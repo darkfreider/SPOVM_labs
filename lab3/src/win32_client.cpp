@@ -34,13 +34,21 @@ int main(void)
 		char *shared_data_buffer = (char *)MapViewOfFile(file_mapping, FILE_MAP_ALL_ACCESS, 0, 0, 1024);
 		if (shared_data_buffer)
 		{
-			for (;;)
+			bool running = true;
+			while (running)
 			{
 				WaitForSingleObject(str_present, INFINITE);
 				WaitForSingleObject(mutex, INFINITE);
 
 				int len = strlen(shared_data_buffer);
-				printf("%d: %s", len, shared_data_buffer);
+				if (len != 0)
+				{
+					printf("%d: %s", len, shared_data_buffer);
+				}
+				else
+				{
+					running = false;
+				}
 
 				ReleaseSemaphore(mutex, 1, 0);
 				ReleaseSemaphore(str_not_present, 1, 0);
